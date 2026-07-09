@@ -29,6 +29,41 @@ namespace LiquidLabsAssessment.Repositories
             return records;
         }
 
+        public async Task<ExternalDataRecord?> GetByExternalIdAsync(int externalId)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            using var command = new SqlCommand("SELECT ExternalId, UserId, Title, Body FROM ExternalData WHERE ExternalId = @ExternalId", connection);
+            command.Parameters.AddWithValue("@ExternalId", externalId);
+
+            await connection.OpenAsync();
+            using var reader = await command.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                return MapToRecord(reader);
+            }
+            return null;
+        }
+
+        public async Task SaveAsync(ExternalDataRecord record)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            string query = @"
+                IF NOT EXISTS (SELECT 1 FROM ExternalData WHERE ExternalId = @ExternalId)
+                BEGIN
+                    INSERT INTO ExternalData (ExternalId, UserId, Title, Body) 
+                    VALUES (@ExternalId, @UserId, @Title, @Body)
+                END";
+
+            using var command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("@ExternalId", record.ExternalId);
+            command.Parameters.AddWithValue("@UserId", record.UserId);
+            command.Parameters.AddWithValue("@Title", record.Title);
+            command.Parameters.AddWithValue("@Body", record.Body);
+
+            await connection.OpenAsync();
+            await command.ExecuteNonQueryAsync();
+        }
+
         private static ExternalDataRecord MapToRecord(SqlDataReader reader)
         {
             return new ExternalDataRecord
