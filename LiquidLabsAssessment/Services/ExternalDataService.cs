@@ -8,8 +8,7 @@ namespace LiquidLabsAssessment.Services
     {
         private readonly IExternalDataRepository _repository;
         private readonly HttpClient _httpClient;
-
-        private const string ApiUrl = "https://jsonplaceholder.typicode.com/posts";
+        private const string ApiUrl = "https://openlibrary.org/subjects/programming.json?limit=10";
 
         public ExternalDataService(IExternalDataRepository repository, HttpClient httpClient)
         {
@@ -17,16 +16,27 @@ namespace LiquidLabsAssessment.Services
             _httpClient = httpClient;
         }
 
-        private class JsonPlaceholderPostDto
+        private class OpenLibraryResponseDto
         {
-            public int Id { get; set; }
-            public int UserId { get; set; }
+            public List<BookWorkDto> Works { get; set; } = new();
+        }
+
+        private class BookWorkDto
+        {
+            public int Cover_Id { get; set; } // Using unique Cover ID as  unique integer ExternalId
             public string Title { get; set; } = string.Empty;
-            public string Body { get; set; } = string.Empty;
+            public List<AuthorDto> Authors { get; set; } = new();
+            public List<string> Subject { get; set; } = new();
+        }
+
+        private class AuthorDto
+        {
+            public string Name { get; set; } = string.Empty;
         }
 
         public async Task<IEnumerable<ExternalDataRecord>> GetRecordsAsync()
         {
+
             var localRecords = await _repository.GetAllAsync();
             if (localRecords.Any())
             {
@@ -38,14 +48,19 @@ namespace LiquidLabsAssessment.Services
 
             var content = await response.Content.ReadAsStringAsync();
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var externalData = JsonSerializer.Deserialize<List<JsonPlaceholderPostDto>>(content, options) ?? new List<JsonPlaceholderPostDto>();
+            var openLibraryData = JsonSerializer.Deserialize<OpenLibraryResponseDto>(content, options);
 
-            var mappedRecords = externalData.Select(dto => new ExternalDataRecord
+            if (openLibraryData == null || !openLibraryData.Works.Any())
+                return Enumerable.Empty<ExternalDataRecord>();
+
+  
+            var mappedRecords = openLibraryData.Works.Select((work, index) => new ExternalDataRecord
             {
-                ExternalId = dto.Id,
-                UserId = dto.UserId,
-                Title = dto.Title,
-                Body = dto.Body
+
+                ExternalId = work.Cover_Id > 0 ? work.Cover_Id : (1000 + index),
+                UserId = index + 1,
+                Title = work.Title, 
+                Body = work.Subject.Any() ? string.Join(", ", work.Subject) : "Programming, Software Engineering" 
             }).ToList();
 
             foreach (var record in mappedRecords)
@@ -58,31 +73,15 @@ namespace LiquidLabsAssessment.Services
 
         public async Task<ExternalDataRecord?> GetRecordByIdAsync(int id)
         {
+
             var localRecord = await _repository.GetByExternalIdAsync(id);
             if (localRecord != null)
             {
                 return localRecord;
             }
 
-            var response = await _httpClient.GetAsync($"{ApiUrl}/{id}");
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var dto = JsonSerializer.Deserialize<JsonPlaceholderPostDto>(content, options);
-
-            if (dto == null) return null;
-
-            var record = new ExternalDataRecord
-            {
-                ExternalId = dto.Id,
-                UserId = dto.UserId,
-                Title = dto.Title,
-                Body = dto.Body
-            };
-
-            await _repository.SaveAsync(record);
-            return record;
+            var recordsPool = await GetRecordsAsync();
+            return recordsPool.FirstOrDefault(r => r.ExternalId == id);
         }
     }
 }
